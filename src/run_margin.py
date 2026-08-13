@@ -5,7 +5,7 @@ import pandas as pd
 
 from src.margin import MAINTENANCE_RATE, UNIT_NOTIONAL_USDT, simulate_margin_policy
 from src.run_baselines import (
-    COSTS_BPS,
+    COST_SCENARIOS,
     build,
     compounded_return,
     make_ledger_from_position,
@@ -18,15 +18,17 @@ OUT = Path(__file__).resolve().parents[1] / "reports"
 BUFFERS = {"buffer_25pct": 0.25, "buffer_50pct": 0.50, "buffer_100pct": 1.00}
 
 
-def apply_costs(ledger, cycle_bps):
+def apply_costs(ledger, fee_multiplier):
     output = ledger.copy()
-    output["cost_return"] = output.turnover * cycle_bps / 20_000
+    output["fee_multiplier"] = fee_multiplier
+    output["spread_slippage_proxy_return"] = output.total_fee_return * (fee_multiplier - 1)
+    output["cost_return"] = output.total_fee_return * fee_multiplier
     output["net_return"] = output.gross_return - output.cost_return
     output["equity"] = (1 + output.net_return.fillna(0)).cumprod()
     return output
 
 
-def summarize(ledger, margin, strategy, buffer_name, buffer_fraction, cost_name, cycle_bps):
+def summarize(ledger, margin, strategy, buffer_name, buffer_fraction, cost_name, fee_multiplier):
     active_margin = margin.margin_balance_usdt.dropna()
     violations = margin[margin.margin_violation]
     return {
@@ -34,7 +36,7 @@ def summarize(ledger, margin, strategy, buffer_name, buffer_fraction, cost_name,
         "buffer_scenario": buffer_name,
         "buffer_fraction": buffer_fraction,
         "cost_scenario": cost_name,
-        "cycle_cost_bps": cycle_bps,
+        "fee_multiplier": fee_multiplier,
         "return_on_notional": compounded_return(ledger.net_return),
         "return_on_capital_employed": compounded_return(ledger.net_return) / (1 + buffer_fraction),
         "capital_employed_usdt_per_100_notional": UNIT_NOTIONAL_USDT * (1 + buffer_fraction),
@@ -42,6 +44,8 @@ def summarize(ledger, margin, strategy, buffer_name, buffer_fraction, cost_name,
         "funding_received_paid_usdt_per_100_notional": ledger.funding_cashflow.sum() * UNIT_NOTIONAL_USDT,
         "execution_hedge_return": ledger.execution_hedge_return.sum(),
         "execution_hedge_usdt_per_100_notional": ledger.execution_hedge_return.sum() * UNIT_NOTIONAL_USDT,
+        "actual_fee_return": ledger.total_fee_return.sum(),
+        "spread_slippage_proxy_return": ledger.spread_slippage_proxy_return.sum(),
         "cost_return": ledger.cost_return.sum(),
         "cost_usdt_per_100_notional": ledger.cost_return.sum() * UNIT_NOTIONAL_USDT,
         "max_drawdown": max_drawdown(ledger.equity),
@@ -56,9 +60,9 @@ def summarize(ledger, margin, strategy, buffer_name, buffer_fraction, cost_name,
     }
 
 
-def run_scenarios(signal_map=None, output_prefix="margin"):
+def run_scenarios(signal_map=None, output_prefix="margin", frame=None):
     OUT.mkdir(exist_ok=True)
-    x = build()
+    x = build() if frame is None else frame.copy()
     signal_map = strategies(x) if signal_map is None else signal_map
     rows = []
     ledgers = {}
@@ -67,15 +71,15 @@ def run_scenarios(signal_map=None, output_prefix="margin"):
         for buffer_name, buffer_fraction in BUFFERS.items():
             margin = simulate_margin_policy(x, target, buffer_fraction)
             ledger = make_ledger_from_position(x, margin.effective_position)
-            for cost_name, cycle_bps in COSTS_BPS.items():
-                priced = apply_costs(ledger, cycle_bps)
+            for cost_name, fee_multiplier in COST_SCENARIOS.items():
+                priced = apply_costs(ledger, fee_multiplier)
                 margin_only = margin[[column for column in margin if column not in priced.columns]]
                 result = pd.concat([priced, margin_only], axis=1)
                 key = (strategy, buffer_name, cost_name)
                 ledgers[key] = result
                 rows.append(
                     summarize(
-                        priced, margin, strategy, buffer_name, buffer_fraction, cost_name, cycle_bps
+                        priced, margin, strategy, buffer_name, buffer_fraction, cost_name, fee_multiplier
                     )
                 )
                 result.to_parquet(OUT / f"{output_prefix}_{strategy}_{buffer_name}_{cost_name}.parquet", index=False)

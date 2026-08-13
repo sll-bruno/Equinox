@@ -1,0 +1,8 @@
+{
+  "dataset": "open_interest",
+  "url": "https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=1h&limit=200&startTime=1716854400000&endTime=1717545600000",
+  "collected_at_utc": "2026-08-13T02:42:21.347543+00:00",
+  "sha256": "7430f485a01357f67ce62d7baabe5bf953bff524d4bd29eaf9e9f916968da083",
+  "file": "data/raw/bybit/open_interest/7430f485a01357f67ce62d7baabe5bf953bff524d4bd29eaf9e9f916968da083.json",
+  "api_time_ms": 1786588941172
+}

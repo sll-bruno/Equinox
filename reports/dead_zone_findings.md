@@ -15,9 +15,9 @@ Each rule is run through every cost scenario and 25%/50%/100% collateral buffer,
 
 ## Result
 
-There are zero candidates out of 54 rule × buffer × cost combinations. No combination had a simulated margin violation, so the zone did not gain a violation advantage. In the base-cost, 25%-buffer comparison, always-on produced +0.2867% OOS net return with -0.2518% OOS drawdown; every zone rule had negative OOS return and materially worse drawdown.
+There are zero candidates out of 54 rule × buffer × cost combinations. No combination had a simulated margin violation, so the zone did not gain a violation advantage. In the base-cost (1.5× actual fees), 25%-buffer comparison, always-on produced +0.3561% OOS net return with -0.1828% OOS drawdown; every zone rule had negative OOS return and materially worse drawdown.
 
-The least-bad base-cost rule was entry 1 bp / exit 0.25 bp with a 48h hold. It still produced -3.9625% total return on notional (-3.1700% on US$125 employed capital), 18 half-turns, and -2.6291% OOS return. It is not a candidate.
+The least-bad base-cost rule was entry 1 bp / exit 0.25 bp with a 72h hold. It still produced -3.6523% total return on notional (-2.9218% on US$125 employed capital), 18 half-turns, and -2.4423% OOS return. It is not a candidate.
 
 The useful conclusion is negative: on this pilot, the simple dead zones destroy the funding carry through turnover and do not improve the selected risk metrics. No further parameter search or HMM is warranted from this evidence.
 

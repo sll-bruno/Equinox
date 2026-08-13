@@ -37,7 +37,7 @@ def norm(name,rows):
  if name.endswith("candles") or name in {"mark_price","index_price","premium_index"}:
   cols=["timestamp_ms","open","high","low","close"]+(["volume","turnover"] if name.endswith("candles") else []);df=pd.DataFrame(rows,columns=cols)
  else:df=pd.DataFrame(rows)
- t=next(c for c in ("timestamp_ms","fundingRateTimestamp","timestamp") if c in df);df["timestamp_utc"]=pd.to_datetime(df[t],unit="ms",utc=True);df=df.sort_values("timestamp_utc").drop_duplicates("timestamp_utc")
+ t=next(c for c in ("timestamp_ms","fundingRateTimestamp","timestamp") if c in df);df["timestamp_utc"]=pd.to_datetime(pd.to_numeric(df[t]),unit="ms",utc=True);df=df.sort_values("timestamp_utc").drop_duplicates("timestamp_utc")
  p=ROOT/"data/normalized/bybit"/f"{name}.parquet";p.parent.mkdir(parents=True,exist_ok=True)
  if p.exists():df=pd.concat([pd.read_parquet(p),df]).sort_values("timestamp_utc").drop_duplicates("timestamp_utc")
  df.to_parquet(p,index=False)
@@ -51,7 +51,15 @@ def collect(name,start,end):
   d,url=get(path,p);all+=raw(name,d,url);start=stop;time.sleep(.15)
  norm(name,all)
 def main():
- a=argparse.ArgumentParser();a.add_argument("--months",type=int,default=3);n=a.parse_args();end=datetime.now(UTC).replace(minute=0,second=0,microsecond=0);start=end-timedelta(days=31*n.months)
+ a=argparse.ArgumentParser();a.add_argument("--months",type=int,default=3);a.add_argument("--start");a.add_argument("--end");n=a.parse_args()
+ def parse_utc(value):
+  parsed=datetime.fromisoformat(value.replace("Z","+00:00"));return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+ if bool(n.start)!=bool(n.end): a.error("--start and --end must be supplied together")
+ if n.start:
+  start,end=parse_utc(n.start),parse_utc(n.end)
+  if start>=end:a.error("--start must precede --end")
+ else:
+  end=datetime.now(UTC).replace(minute=0,second=0,microsecond=0);start=end-timedelta(days=31*n.months)
  for x in SPECS:collect(x,start,end)
  for cat in ("spot","linear"):
   d,url=get("/v5/market/instruments-info",{"category":cat,"symbol":"BTCUSDT"});raw(f"instrument_{cat}",d,url)

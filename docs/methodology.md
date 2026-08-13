@@ -18,7 +18,9 @@ V0 assumes Bybit non-VIP taker execution: 0.10% for spot and 0.055% for the line
 
 `total fees = 0.001 q S0 + 0.001 q ST + 0.00055 q F0 + 0.00055 q FT`
 
-The approximate 31 bp complete-cycle cost is not subtracted directly because entry and exit prices can differ. For fee calculation only, each entry is normalized to one unit of spot notional (`q = 1 / S0`) and that quantity is carried until exit. The existing funding, basis, signal and position calculations are unchanged. V0 does not include spread, slippage or the former non-historical execution buffers.
+The approximate 31 bp complete-cycle cost is not subtracted directly because entry and exit prices can differ. For fee calculation only, each entry is normalized to one unit of spot notional (`q = 1 / S0`) and that quantity is carried until exit. The existing funding, basis, signal and position calculations are unchanged.
+
+Historical bid/ask and fill data remain unavailable, so the execution-cost sensitivity is explicit rather than invented: `fee_only` multiplies the actual-value fees by 1.0; `base` by 1.5; and `stress` by 3.0. The excess above 1.0 is recorded as `spread_slippage_proxy_return`, not treated as measured spread or slippage. Thus the adverse scenarios retain actual per-leg traded values while restoring the cost-adversity lens; they are still assumptions.
 
 No performance claim is valid until the collector, validations and analysis run successfully.
 
@@ -39,6 +41,12 @@ The initial buffer plus accumulated funding and this marked P&L form margin equi
 Funding is put in the separately collateralized perp account only when the short was already open over the preceding funding interval. A target exit at `t` still receives/pays the settlement due for `[t-8h, t]`; a position newly entered at `t` does not. Execution P&L and all trade costs remain calculated from tradable last-price opens. Mark remains non-executable and is used only for the margin check and basis.
 
 `return_on_capital_employed` uses the reported US$100-notional return divided by a static capital denominator of `100 + buffer`. It is a simple pilot capital-efficiency normalization, not an annualized return, IRR, or claim that capital can be continuously reallocated.
+
+## Historical rally stress window
+
+The original 2026 pilot contains a bear-market path and does not stress the short leg. A separate, pre-declared Bybit BTCUSDT window from 2023-10-01 through 2024-09-01 UTC is therefore collected with the same raw/manifest/Parquet process. It includes a 173.27% maximum mark-price rise from the opening mark (US$26,953.50 to US$73,655.72) and both a +13.87% and a -18.40% maximum 24-hour mark move. The normalized store has an intentional gap between the two research windows; runners select one window at a time and never concatenate them into a single performance series.
+
+`src.run_rally_margin` runs the same collateral policy on this historical window and writes `reports/rally_margin_summary.csv`. It is a margin-risk stress report, not a claim that its P&L can be combined with the 2026 pilot or that it replicates Bybit historical liquidation.
 
 ## Pre-declared dead-zone check
 

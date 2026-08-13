@@ -1,0 +1,8 @@
+{
+  "dataset": "index_price",
+  "url": "https://api.bybit.com/v5/market/index-price-kline?category=linear&symbol=BTCUSDT&interval=60&limit=1000&start=1706486400000&end=1709942400000",
+  "collected_at_utc": "2026-08-13T02:41:48.931402+00:00",
+  "sha256": "a5a856692e0c8ec9f4cb51746404c88e2dec7d3bd6a2c0c20400b8f05d281716",
+  "file": "data/raw/bybit/index_price/a5a856692e0c8ec9f4cb51746404c88e2dec7d3bd6a2c0c20400b8f05d281716.json",
+  "api_time_ms": 1786588908696
+}

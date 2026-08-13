@@ -1,0 +1,8 @@
+{
+  "dataset": "instrument_spot",
+  "url": "https://api.bybit.com/v5/market/instruments-info?category=spot&symbol=BTCUSDT",
+  "collected_at_utc": "2026-08-13T02:42:39.149661+00:00",
+  "sha256": "809d1604e5b79e107d6bb270eefdbbd1f51c26ffe386e353109719816e51ff85",
+  "file": "data/raw/bybit/instrument_spot/809d1604e5b79e107d6bb270eefdbbd1f51c26ffe386e353109719816e51ff85.json",
+  "api_time_ms": 1786588958970
+}

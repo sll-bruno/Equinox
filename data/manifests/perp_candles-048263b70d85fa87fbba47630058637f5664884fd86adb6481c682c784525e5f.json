@@ -1,0 +1,8 @@
+{
+  "dataset": "perp_candles",
+  "url": "https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=60&limit=1000&start=1699574400000&end=1703030400000",
+  "collected_at_utc": "2026-08-13T02:41:35.470435+00:00",
+  "sha256": "048263b70d85fa87fbba47630058637f5664884fd86adb6481c682c784525e5f",
+  "file": "data/raw/bybit/perp_candles/048263b70d85fa87fbba47630058637f5664884fd86adb6481c682c784525e5f.json",
+  "api_time_ms": 1786588895170
+}

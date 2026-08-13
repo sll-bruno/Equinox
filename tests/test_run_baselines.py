@@ -4,7 +4,9 @@ from src.run_baselines import (
     PERP_TAKER_FEE_RATE,
     SPOT_TAKER_FEE_RATE,
     build,
+    cash_return,
     make_ledger,
+    make_ledger_from_position,
     turnover,
 )
 from src.run_margin import apply_costs
@@ -24,6 +26,7 @@ def test_complete_cycle_fees_use_actual_traded_values():
         {
             "spot_open": [100.0, 100.0, 110.0],
             "perp_last_open": [101.0, 102.0, 111.0],
+            "perp_mark_open": [101.0, 102.0, 111.0],
             "funding_settled": [float("nan"), float("nan"), float("nan")],
             "hedge_execution_return_last": [0.0, 0.0, 0.0],
         }
@@ -42,6 +45,7 @@ def test_stress_costs_scale_actual_value_fees_without_changing_gross_return():
         {
             "spot_open": [100.0, 100.0, 100.0],
             "perp_last_open": [100.0, 100.0, 100.0],
+            "perp_mark_open": [100.0, 100.0, 100.0],
             "funding_settled": [float("nan")] * 3,
             "hedge_execution_return_last": [0.0] * 3,
         }
@@ -59,15 +63,51 @@ def test_cost_sensitivity_uses_actual_fees_not_flat_turnover_bps():
 
 
 def test_rally_margin_breach_thresholds_are_explicit():
-    assert abs(breach_return(0.25) - 0.19047619047619047) < 1e-12
-    assert abs(breach_return(0.50) - 0.42857142857142855) < 1e-12
-    assert abs(breach_return(1.00) - 0.9047619047619048) < 1e-12
+    expected = lambda buffer: (buffer - 0.05 - 2 * PERP_TAKER_FEE_RATE) / (
+        1 + 0.05 + PERP_TAKER_FEE_RATE
+    )
+    assert abs(breach_return(0.25) - expected(0.25)) < 1e-12
+    assert abs(breach_return(0.50) - expected(0.50)) < 1e-12
+    assert abs(breach_return(1.00) - expected(1.00)) < 1e-12
 
 
-def test_features_do_not_use_same_settlement_funding():
+def test_latest_settled_funding_is_available_for_next_open_decision():
     frame = build()
-    expected = frame.funding_settled.ffill().shift(1)
+    expected = frame.funding_settled.ffill()
     pd.testing.assert_series_equal(frame.last_settled_funding, expected, check_names=False)
+
+
+def test_fixed_quantity_hedge_uses_dollar_moves_not_mismatched_percent_returns():
+    frame = pd.DataFrame(
+        {
+            "spot_open": [100.0, 80.0],
+            "perp_last_open": [101.0, 81.0],
+            "perp_mark_open": [101.0, 81.0],
+            "funding_settled": [float("nan"), float("nan")],
+            "hedge_execution_return_last": [-0.2 - (-20 / 101), float("nan")],
+        }
+    )
+    ledger = make_ledger_from_position(frame, pd.Series([1, 1]))
+    assert ledger.trade_quantity_btc.tolist() == [0.01, 0.01]
+    assert abs(ledger.spot_pnl_return.sum() + 0.20) < 1e-12
+    assert abs(ledger.perp_pnl_return.sum() - 0.20) < 1e-12
+    assert abs(ledger.execution_hedge_return.sum()) < 1e-12
+
+
+def test_funding_uses_fixed_quantity_times_current_mark_not_constant_notional():
+    frame = pd.DataFrame(
+        {
+            "spot_open": [100.0, 50.0],
+            "perp_last_open": [100.0, 50.0],
+            "perp_mark_open": [100.0, 50.0],
+            "funding_settled": [float("nan"), 0.0001],
+            "hedge_execution_return_last": [0.0, float("nan")],
+        }
+    )
+    ledger = make_ledger_from_position(frame, pd.Series([1, 1]))
+    # q=0.01 BTC and current mark=50, so funding is 0.01*50*0.01%=0.00005.
+    assert abs(ledger.funding_cashflow.iloc[1] - 0.00005) < 1e-12
+    assert ledger.funding_cashflow.iloc[1] != 0.0001
 
 
 def test_funding_is_only_booked_at_settlements_and_to_prior_position():
@@ -85,8 +125,8 @@ def test_funding_is_only_booked_at_settlements_and_to_prior_position():
 def test_terminal_exit_does_not_change_gross_return():
     frame = build().head(32).copy()
     ledger = make_ledger(frame, pd.Series(True, index=frame.index))
-    gross = (1 + ledger.gross_return.fillna(0)).prod() - 1
+    gross = cash_return(ledger.gross_return)
     net_without_exit = ledger.gross_return - ledger.trading_fee_return
     net_with_exit = ledger.gross_return - ledger.total_fee_return
-    assert gross == (1 + ledger.gross_return.fillna(0)).prod() - 1
-    assert (1 + net_with_exit.fillna(0)).prod() < (1 + net_without_exit.fillna(0)).prod()
+    assert gross == ledger.gross_return.fillna(0).sum()
+    assert cash_return(net_with_exit) < cash_return(net_without_exit)

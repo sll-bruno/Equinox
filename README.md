@@ -1,5 +1,8 @@
 # Equinox
+
 Funding Regime Engine
+
+O estado consolidado da tese, metodologia, resultados, limitações e próximos passos está em [`reports/consolidated_research_report.md`](reports/consolidated_research_report.md).
 
 Reproduce the current Bybit BTCUSDT pilot (Python 3.11+):
 

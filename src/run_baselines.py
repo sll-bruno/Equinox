@@ -25,8 +25,9 @@ def read(name):
     return pd.read_parquet(DATA / f"{name}.parquet").sort_values("timestamp_utc")
 
 
-def compounded_return(returns):
-    return (1 + returns.fillna(0)).prod() - 1
+def cash_return(cashflows):
+    """Return on one unit of spot entry notional from normalized USDT cashflows."""
+    return cashflows.fillna(0).sum()
 
 
 def max_drawdown(equity):
@@ -66,8 +67,10 @@ def build(start=PRIMARY_PILOT_START, end=PRIMARY_PILOT_END):
     funding["funding_settled"] = pd.to_numeric(funding["funding_settled"])
     x = x.merge(funding, on="timestamp_utc", how="left")
 
-    # Every feature is lagged. A settlement is an outcome, never a same-timestamp signal.
-    x["last_settled_funding"] = x.funding_settled.ffill().shift(1)
+    # At a funding timestamp the settled rate is known before an order executed at
+    # the next hourly open. Forward-fill it between settlements without an extra
+    # eight-hour delay.
+    x["last_settled_funding"] = x.funding_settled.ffill()
     x["vol_24h"] = x.spot_execution_return.rolling(24).std().shift(1)
     x["basis_lag"] = x.basis_mark_vs_spot.shift(1)
     return x
@@ -109,33 +112,41 @@ def position_from_signal(signal):
 
 
 def make_ledger_from_position(x, position):
-    """Build the execution/funding ledger for an already point-in-time position path."""
+    """Build a fixed-BTC-quantity USDT cash ledger for a point-in-time position path.
+
+    Every entry allocates one USDT of spot notional and fixes q = 1 / spot entry
+    price. The same q is used for spot P&L, short-perp P&L, funding and all fees
+    until that trade exits.
+    """
     ledger = x.copy()
     # Preserve the caller's 0/1 representation; only its values have economic meaning.
     ledger["position"] = position
     ledger["trading_turnover"], ledger["terminal_exit_turnover"], ledger["turnover"] = turnover(ledger.position)
 
-    # Fee-only quantity tracking. Gross P&L, funding and basis calculations below
-    # intentionally retain their original return-based implementation.
     previous_position = ledger.position.shift(1).fillna(0)
     ledger["entry"] = ((ledger.position == 1) & (previous_position == 0)).astype(int)
     ledger["exit"] = ((ledger.position == 0) & (previous_position == 1)).astype(int)
     entry_quantity = (1 / ledger.spot_open).where(ledger.entry == 1)
-    fee_quantity = entry_quantity.ffill().where(ledger.position == 1, 0.0)
-    exit_quantity = fee_quantity.shift(1).where(ledger.exit == 1, 0.0).fillna(0)
+    ledger["trade_quantity_btc"] = entry_quantity.ffill().where(ledger.position == 1, 0.0)
+    exit_quantity = (
+        ledger.trade_quantity_btc.shift(1).where(ledger.exit == 1, 0.0).fillna(0)
+    )
 
     ledger["spot_entry_fee_return"] = (
-        ledger.entry * fee_quantity * ledger.spot_open * SPOT_TAKER_FEE_RATE
+        ledger.entry * ledger.trade_quantity_btc * ledger.spot_open * SPOT_TAKER_FEE_RATE
     )
     ledger["perp_entry_fee_return"] = (
-        ledger.entry * fee_quantity * ledger.perp_last_open * PERP_TAKER_FEE_RATE
+        ledger.entry
+        * ledger.trade_quantity_btc
+        * ledger.perp_last_open
+        * PERP_TAKER_FEE_RATE
     )
     ledger["spot_exit_fee_return"] = exit_quantity * ledger.spot_open * SPOT_TAKER_FEE_RATE
     ledger["perp_exit_fee_return"] = exit_quantity * ledger.perp_last_open * PERP_TAKER_FEE_RATE
     ledger["terminal_spot_exit_fee_return"] = 0.0
     ledger["terminal_perp_exit_fee_return"] = 0.0
     if ledger.position.iloc[-1] == 1:
-        final_quantity = fee_quantity.iloc[-1]
+        final_quantity = ledger.trade_quantity_btc.iloc[-1]
         ledger.loc[ledger.index[-1], "terminal_spot_exit_fee_return"] = (
             final_quantity * ledger.spot_open.iloc[-1] * SPOT_TAKER_FEE_RATE
         )
@@ -160,22 +171,30 @@ def make_ledger_from_position(x, position):
     )
     ledger["total_fee_return"] = ledger.spot_fee_return + ledger.perp_fee_return
 
-    # A t-settlement belongs to the position carried into t, i.e. the preceding interval [t-8h, t].
+    # A t-settlement belongs to the fixed q carried into t. For BTCUSDT linear
+    # perpetuals the USDT funding cashflow is q * mark_at_settlement * rate.
     ledger["funding_position_prior_interval"] = ledger.position.shift(1).fillna(0)
-    ledger["funding_cashflow"] = (
-        ledger.funding_settled.fillna(0) * ledger.funding_position_prior_interval
-    )
-    # There is no t→t+1 price move after the final timestamp, but an open position still pays exit cost.
-    ledger["execution_hedge_return"] = (
-        ledger.position * ledger.hedge_execution_return_last
+    ledger["funding_quantity_btc"] = (
+        ledger.trade_quantity_btc.shift(1) * ledger.funding_position_prior_interval
     ).fillna(0)
+    ledger["funding_cashflow"] = (
+        ledger.funding_quantity_btc
+        * ledger.perp_mark_open
+        * ledger.funding_settled.fillna(0)
+    )
+
+    # Fixed-q cash P&L between executable hourly opens. The final row has no
+    # following price move, but an open trade still pays its terminal exit fees.
+    ledger["spot_pnl_return"] = (
+        ledger.trade_quantity_btc * (ledger.spot_open.shift(-1) - ledger.spot_open)
+    ).fillna(0)
+    ledger["perp_pnl_return"] = (
+        ledger.trade_quantity_btc
+        * (ledger.perp_last_open - ledger.perp_last_open.shift(-1))
+    ).fillna(0)
+    ledger["execution_hedge_return"] = ledger.spot_pnl_return + ledger.perp_pnl_return
     ledger["gross_return"] = ledger.execution_hedge_return + ledger.funding_cashflow
 
-    # Reproduces the published pilot for transparent old-versus-new comparison only.
-    ledger["legacy_funding_cashflow"] = ledger.position * ledger.funding_settled.fillna(0)
-    # The old output's terminal NaN discarded both its terminal price P&L and a same-row settlement.
-    legacy_execution = ledger.position * ledger.hedge_execution_return_last
-    ledger["legacy_gross_return"] = legacy_execution + ledger.legacy_funding_cashflow
     return ledger
 
 
@@ -193,11 +212,10 @@ def evaluate(x, name, signal):
         priced["spread_slippage_proxy_return"] = priced.total_fee_return * (fee_multiplier - 1)
         priced["cost_return"] = priced.total_fee_return * fee_multiplier
         priced["net_return"] = priced.gross_return - priced.cost_return
-        priced["legacy_net_return"] = priced.legacy_gross_return - priced.trading_fee_return
         priced["net_return_without_terminal_exit"] = (
             priced.gross_return - priced.trading_fee_return * fee_multiplier
         )
-        priced["equity"] = (1 + priced.net_return.fillna(0)).cumprod()
+        priced["equity"] = 1 + priced.net_return.fillna(0).cumsum()
         net = priced.net_return.dropna()
         terminal_fee_return = (
             priced.terminal_spot_exit_fee_return.sum()
@@ -211,15 +229,13 @@ def evaluate(x, name, signal):
                 "fee_multiplier": fee_multiplier,
                 "spot_taker_fee_rate": SPOT_TAKER_FEE_RATE,
                 "perp_taker_fee_rate": PERP_TAKER_FEE_RATE,
-                "legacy_published_net_return_no_terminal_exit": compounded_return(priced.legacy_net_return),
-                "net_return_without_terminal_exit": compounded_return(
+                "net_return_without_terminal_exit": cash_return(
                     priced.net_return_without_terminal_exit
                 ),
-                "net_return_with_terminal_exit": compounded_return(priced.net_return),
-                "terminal_exit_impact": compounded_return(priced.net_return)
-                - compounded_return(priced.net_return_without_terminal_exit),
-                "legacy_published_gross_return": compounded_return(priced.legacy_gross_return),
-                "gross_return": compounded_return(priced.gross_return),
+                "net_return_with_terminal_exit": cash_return(priced.net_return),
+                "terminal_exit_impact": cash_return(priced.net_return)
+                - cash_return(priced.net_return_without_terminal_exit),
+                "gross_return": cash_return(priced.gross_return),
                 "funding_return": priced.funding_cashflow.sum(),
                 "execution_hedge_return": priced.execution_hedge_return.sum(),
                 "spot_fee_return": priced.spot_fee_return.sum(),
@@ -241,8 +257,10 @@ def evaluate(x, name, signal):
 
 
 def hedge_mark_vs_last(x):
-    last = compounded_return(x.hedge_execution_return_last)
-    mark = compounded_return(x.hedge_return_mark_comparator)
+    quantity = 1 / x.spot_open.iloc[0]
+    spot_pnl = quantity * (x.spot_open.iloc[-1] - x.spot_open.iloc[0])
+    last = spot_pnl + quantity * (x.perp_last_open.iloc[0] - x.perp_last_open.iloc[-1])
+    mark = spot_pnl + quantity * (x.perp_mark_open.iloc[0] - x.perp_mark_open.iloc[-1])
     return {"last_return": last, "mark_return": mark, "mark_minus_last": mark - last}
 
 

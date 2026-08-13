@@ -87,10 +87,16 @@ def turnover(position):
     return trading, terminal_exit, trading + terminal_exit
 
 
-def make_ledger(x, signal):
+def position_from_signal(signal):
+    """A decision at t is executed at the next candle open, t+1."""
+    return signal.fillna(False).astype(int).shift(1).fillna(0)
+
+
+def make_ledger_from_position(x, position):
+    """Build the execution/funding ledger for an already point-in-time position path."""
     ledger = x.copy()
-    # signal t -> trade at open t+1 -> position[t] earns t→t+1 execution P&L.
-    ledger["position"] = signal.fillna(False).astype(int).shift(1).fillna(0)
+    # Preserve the caller's 0/1 representation; only its values have economic meaning.
+    ledger["position"] = position
     ledger["trading_turnover"], ledger["terminal_exit_turnover"], ledger["turnover"] = turnover(ledger.position)
     # A t-settlement belongs to the position carried into t, i.e. the preceding interval [t-8h, t].
     ledger["funding_position_prior_interval"] = ledger.position.shift(1).fillna(0)
@@ -109,6 +115,11 @@ def make_ledger(x, signal):
     legacy_execution = ledger.position * ledger.hedge_execution_return_last
     ledger["legacy_gross_return"] = legacy_execution + ledger.legacy_funding_cashflow
     return ledger
+
+
+def make_ledger(x, signal):
+    # signal t -> trade at open t+1 -> position[t] earns t→t+1 execution P&L.
+    return make_ledger_from_position(x, position_from_signal(signal))
 
 
 def evaluate(x, name, signal):

@@ -7,7 +7,7 @@ from src.margin import MAINTENANCE_RATE, UNIT_NOTIONAL_USDT, simulate_margin_pol
 from src.run_baselines import (
     COST_SCENARIOS,
     build,
-    compounded_return,
+    cash_return,
     make_ledger_from_position,
     max_drawdown,
     position_from_signal,
@@ -24,7 +24,7 @@ def apply_costs(ledger, fee_multiplier):
     output["spread_slippage_proxy_return"] = output.total_fee_return * (fee_multiplier - 1)
     output["cost_return"] = output.total_fee_return * fee_multiplier
     output["net_return"] = output.gross_return - output.cost_return
-    output["equity"] = (1 + output.net_return.fillna(0)).cumprod()
+    output["equity"] = 1 + output.net_return.fillna(0).cumsum()
     return output
 
 
@@ -37,8 +37,8 @@ def summarize(ledger, margin, strategy, buffer_name, buffer_fraction, cost_name,
         "buffer_fraction": buffer_fraction,
         "cost_scenario": cost_name,
         "fee_multiplier": fee_multiplier,
-        "return_on_notional": compounded_return(ledger.net_return),
-        "return_on_capital_employed": compounded_return(ledger.net_return) / (1 + buffer_fraction),
+        "return_on_notional": cash_return(ledger.net_return),
+        "return_on_capital_employed": cash_return(ledger.net_return) / (1 + buffer_fraction),
         "capital_employed_usdt_per_100_notional": UNIT_NOTIONAL_USDT * (1 + buffer_fraction),
         "funding_received_paid_return": ledger.funding_cashflow.sum(),
         "funding_received_paid_usdt_per_100_notional": ledger.funding_cashflow.sum() * UNIT_NOTIONAL_USDT,

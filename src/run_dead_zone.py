@@ -12,7 +12,7 @@ OUT = Path(__file__).resolve().parents[1] / "reports"
 
 def oos_metrics(ledger, start):
     sample = ledger[ledger.timestamp_utc >= start]
-    equity = (1 + sample.net_return.fillna(0)).cumprod()
+    equity = 1 + sample.net_return.fillna(0).cumsum()
     return {
         "oos_net_return": equity.iloc[-1] - 1,
         "oos_max_drawdown": (equity / equity.cummax() - 1).min(),

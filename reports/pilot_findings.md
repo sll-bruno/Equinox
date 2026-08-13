@@ -4,32 +4,34 @@ Period: 2026-05-12 00:00 UTC through 2026-08-13 00:00 UTC; 2,233 hourly timestam
 
 ## Method corrections applied
 
-1. All strategies now pay a terminal exit for both legs. A full open-and-close cycle has two half-turns; `always_on` therefore has turnover of exactly 2, not 1.
-2. Funding at settlement `t` is credited to the position carried into `t`, never to the position opening at `t`.
-3. Execution P&L uses BTCUSDT spot and perpetual **opening last-trade prices** between `t` and `t+1`. Mark price is used only for basis and as a non-executable comparator.
+1. Every entry fixes `q = 1 / spot_open` BTC and uses exactly that quantity for spot P&L, perp P&L, funding and fees until exit.
+2. Funding at settlement `t` is `q × mark_open[t] × fundingRate[t]` and is credited only to the quantity carried into `t`.
+3. A rate settled at `t` can inform a decision executed at the next hourly open; the signal no longer uses an unnecessarily eight-hour-old settlement.
+4. Execution P&L uses fixed-quantity USDT cash moves between spot and perpetual **opening last-trade prices**. It no longer subtracts percentage returns with different denominators.
+5. All strategies pay a terminal exit for both legs.
 
 ## Funding sign check
 
-Bybit specifies that positive funding makes long holders pay short holders. The raw API record in `data/raw/bybit/funding/4954d6dde7105727e65c95a6a18836284673db674fc359c5337632174f954139.json` reports BTCUSDT funding of `+0.000016` at 2026-05-12 00:00 UTC. For a one-USDT equivalent short notional this is a receipt of 0.000016 USDT; for the baseline short-perp leg it is therefore added, not subtracted. The sign in the motor is confirmed.
+Bybit specifies that positive funding makes long holders pay short holders. The raw API record in `data/raw/bybit/funding/4954d6dde7105727e65c95a6a18836284673db674fc359c5337632174f954139.json` reports BTCUSDT funding of `+0.000016` at 2026-05-12 00:00 UTC. For a short, the signed cash receipt is `q × mark × 0.000016`; it is therefore added, not subtracted. The sign in the motor is confirmed.
 
-## Actual-value fee results
+## Fixed-quantity cash-ledger results
 
-Funding, execution hedge P&L, signals and positions retain the prior implementation. V0 applies 0.10% spot and 0.055% perpetual taker fees to the value actually traded at every entry and exit; the approximate 31 bp round trip is not used directly. Because historical bid/ask and fill data are unavailable, the cost sensitivity retains those actual fees and applies a multiplier: 1.0× (`fee_only`), 1.5× (`base`) and 3.0× (`stress`). The excess is an explicit spread/slippage proxy, not measured execution data.
+V1 applies 0.10% spot and 0.055% perpetual taker fees to the value actually traded at every entry and exit; the approximate 31 bp round trip is not used directly. Because historical bid/ask and fill data are unavailable, the cost sensitivity retains those actual fees and applies a multiplier: 1.0× (`fee_only`), 1.5× (`base`) and 3.0× (`stress`). The excess is an explicit spread/slippage proxy, not measured execution data.
 
 | Strategy | Gross return | Actual fees | Net fee-only | Net base (1.5×) | Net stress (3×) |
 |---|---:|---:|---:|---:|---:|
-| always-on | 0.8203% | 0.2756% | 0.5427% | 0.4040% | -0.0116% |
-| positive last settled funding | 0.7509% | 11.1444% | -9.8818% | -14.7752% | -27.9369% |
-| funding above threshold | 0.4903% | 11.4667% | -10.4044% | -15.4062% | -28.8166% |
-| positive funding with volatility/basis filter | 0.3533% | 10.2187% | -9.4021% | -13.9232% | -26.1952% |
+| always-on | 0.6620% | 0.2756% | 0.3864% | 0.2486% | -0.1648% |
+| positive last settled funding | 0.8719% | 11.1413% | -10.2694% | -15.8401% | -32.5521% |
+| funding above threshold | 0.5861% | 11.4551% | -10.8690% | -16.5965% | -33.7792% |
+| positive funding with volatility/basis filter | 0.3998% | 10.5241% | -10.1243% | -15.3863% | -31.1725% |
 
-The always-on gross return remains 0.8203%, consisting of 0.8164% funding and 0.0013% execution hedge return. This confirms that the fee change did not alter either gross-return component.
+The always-on gross return is 0.6620%, consisting of 0.6675% mark-notional funding and -0.0055% fixed-quantity hedge/basis P&L. The prior return-based motor reported 0.8203% gross and overstated dollar funding on this falling-BTC path by holding perp notional artificially constant.
 
 The reactive rules remain negative because their repeated entries and exits generate high fees. The adverse-cost test reverses even always-on's small pilot profit, so this is not evidence that the strategy reliably survives costs. Exact results and fee components are in `baseline_summary.csv`.
 
 ## Mark versus last-price comparator
 
-Over the same hourly intervals, the compounded execution hedge return is -0.00285% with last-traded perp opens and -0.00313% with mark-price opens. The mark-minus-last difference is -0.000274 percentage points (-0.0274 bp). This small sample difference does not justify treating mark as executable; it remains an input for basis and a future margin/liquidation model.
+For a fixed quantity held across the comparison window, hedge P&L is -0.00905% using last-traded perp opens and -0.00799% using mark opens, a difference of +0.1064 bp. Mark remains non-executable; it is used for funding notional, basis and margin.
 
 ## What this establishes
 

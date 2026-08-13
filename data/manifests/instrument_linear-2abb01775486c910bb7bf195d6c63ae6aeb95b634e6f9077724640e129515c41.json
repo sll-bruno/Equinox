@@ -1,0 +1,8 @@
+{
+  "dataset": "instrument_linear",
+  "url": "https://api.bybit.com/v5/market/instruments-info?category=linear&symbol=BTCUSDT",
+  "collected_at_utc": "2026-08-13T00:46:16.955384+00:00",
+  "sha256": "2abb01775486c910bb7bf195d6c63ae6aeb95b634e6f9077724640e129515c41",
+  "file": "data/raw/bybit/instrument_linear/2abb01775486c910bb7bf195d6c63ae6aeb95b634e6f9077724640e129515c41.json",
+  "api_time_ms": 1786581976926
+}

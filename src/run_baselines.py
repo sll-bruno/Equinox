@@ -5,10 +5,20 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data/normalized/bybit"
 OUT = ROOT / "reports"
+PRIMARY_PILOT_START = "2026-05-12T00:00:00Z"
+PRIMARY_PILOT_END = "2026-08-13T01:00:00Z"  # exclusive
 
 # Bybit non-VIP taker rates used by the V0 fee specification.
 SPOT_TAKER_FEE_RATE = 0.001
 PERP_TAKER_FEE_RATE = 0.00055
+
+# Each scenario retains the fees calculated from actual per-leg traded values.
+# The multiplier adds an explicit proxy for unavailable historical spread/slippage.
+COST_SCENARIOS = {
+    "fee_only": 1.0,
+    "base": 1.5,
+    "stress": 3.0,
+}
 
 
 def read(name):
@@ -23,7 +33,7 @@ def max_drawdown(equity):
     return (equity / equity.cummax() - 1).min()
 
 
-def build():
+def build(start=PRIMARY_PILOT_START, end=PRIMARY_PILOT_END):
     spot = read("spot_candles")[["timestamp_utc", "open", "close"]].rename(
         columns={"open": "spot_open", "close": "spot_close"}
     )
@@ -34,6 +44,11 @@ def build():
         columns={"open": "perp_mark_open", "close": "perp_mark_close"}
     )
     x = spot.merge(perp, on="timestamp_utc").merge(mark, on="timestamp_utc")
+    if start is not None:
+        x = x[x.timestamp_utc >= pd.Timestamp(start)]
+    if end is not None:
+        x = x[x.timestamp_utc < pd.Timestamp(end)]
+    x = x.reset_index(drop=True)
     for column in x.columns[1:]:
         x[column] = pd.to_numeric(x[column])
 
@@ -171,42 +186,58 @@ def make_ledger(x, signal):
 
 def evaluate(x, name, signal):
     ledger = make_ledger(x, signal)
-    ledger["net_return"] = ledger.gross_return - ledger.total_fee_return
-    ledger["legacy_net_return"] = ledger.legacy_gross_return - ledger.trading_fee_return
-    ledger["net_return_without_terminal_exit"] = ledger.gross_return - ledger.trading_fee_return
-    ledger["equity"] = (1 + ledger.net_return.fillna(0)).cumprod()
-    net = ledger.net_return.dropna()
-    terminal_fee_return = (
-        ledger.terminal_spot_exit_fee_return.sum()
-        + ledger.terminal_perp_exit_fee_return.sum()
-    )
-    row = {
-        "strategy": name,
-        "fee_model": "bybit_non_vip_taker_actual_traded_value",
-        "spot_taker_fee_rate": SPOT_TAKER_FEE_RATE,
-        "perp_taker_fee_rate": PERP_TAKER_FEE_RATE,
-        "legacy_published_net_return_no_terminal_exit": compounded_return(ledger.legacy_net_return),
-        "net_return_without_terminal_exit": compounded_return(ledger.net_return_without_terminal_exit),
-        "net_return_with_terminal_exit": compounded_return(ledger.net_return),
-        "terminal_exit_impact": compounded_return(ledger.net_return)
-        - compounded_return(ledger.net_return_without_terminal_exit),
-        "legacy_published_gross_return": compounded_return(ledger.legacy_gross_return),
-        "gross_return": compounded_return(ledger.gross_return),
-        "funding_return": ledger.funding_cashflow.sum(),
-        "execution_hedge_return": ledger.execution_hedge_return.sum(),
-        "spot_fee_return": ledger.spot_fee_return.sum(),
-        "perp_fee_return": ledger.perp_fee_return.sum(),
-        "total_fee_return": ledger.total_fee_return.sum(),
-        "terminal_exit_fee_return": terminal_fee_return,
-        "max_drawdown": max_drawdown(ledger.equity),
-        "annualized_volatility": net.std() * (24 * 365) ** 0.5,
-        "turnover_without_terminal_exit": ledger.trading_turnover.sum(),
-        "terminal_exit_turnover": ledger.terminal_exit_turnover.sum(),
-        "turnover_events": ledger.turnover.sum(),
-        "exposure": ledger.position.mean(),
-    }
-    ledger.to_parquet(OUT / f"pilot_{name}_fee_only.parquet", index=False)
-    return [row]
+    rows = []
+    for scenario, fee_multiplier in COST_SCENARIOS.items():
+        priced = ledger.copy()
+        priced["fee_multiplier"] = fee_multiplier
+        priced["spread_slippage_proxy_return"] = priced.total_fee_return * (fee_multiplier - 1)
+        priced["cost_return"] = priced.total_fee_return * fee_multiplier
+        priced["net_return"] = priced.gross_return - priced.cost_return
+        priced["legacy_net_return"] = priced.legacy_gross_return - priced.trading_fee_return
+        priced["net_return_without_terminal_exit"] = (
+            priced.gross_return - priced.trading_fee_return * fee_multiplier
+        )
+        priced["equity"] = (1 + priced.net_return.fillna(0)).cumprod()
+        net = priced.net_return.dropna()
+        terminal_fee_return = (
+            priced.terminal_spot_exit_fee_return.sum()
+            + priced.terminal_perp_exit_fee_return.sum()
+        )
+        rows.append(
+            {
+                "strategy": name,
+                "cost_scenario": scenario,
+                "fee_model": "bybit_non_vip_taker_actual_traded_value_plus_proxy",
+                "fee_multiplier": fee_multiplier,
+                "spot_taker_fee_rate": SPOT_TAKER_FEE_RATE,
+                "perp_taker_fee_rate": PERP_TAKER_FEE_RATE,
+                "legacy_published_net_return_no_terminal_exit": compounded_return(priced.legacy_net_return),
+                "net_return_without_terminal_exit": compounded_return(
+                    priced.net_return_without_terminal_exit
+                ),
+                "net_return_with_terminal_exit": compounded_return(priced.net_return),
+                "terminal_exit_impact": compounded_return(priced.net_return)
+                - compounded_return(priced.net_return_without_terminal_exit),
+                "legacy_published_gross_return": compounded_return(priced.legacy_gross_return),
+                "gross_return": compounded_return(priced.gross_return),
+                "funding_return": priced.funding_cashflow.sum(),
+                "execution_hedge_return": priced.execution_hedge_return.sum(),
+                "spot_fee_return": priced.spot_fee_return.sum(),
+                "perp_fee_return": priced.perp_fee_return.sum(),
+                "actual_fee_return": priced.total_fee_return.sum(),
+                "spread_slippage_proxy_return": priced.spread_slippage_proxy_return.sum(),
+                "total_cost_return": priced.cost_return.sum(),
+                "terminal_exit_fee_return": terminal_fee_return * fee_multiplier,
+                "max_drawdown": max_drawdown(priced.equity),
+                "annualized_volatility": net.std() * (24 * 365) ** 0.5,
+                "turnover_without_terminal_exit": priced.trading_turnover.sum(),
+                "terminal_exit_turnover": priced.terminal_exit_turnover.sum(),
+                "turnover_events": priced.turnover.sum(),
+                "exposure": priced.position.mean(),
+            }
+        )
+        priced.to_parquet(OUT / f"pilot_{name}_{scenario}.parquet", index=False)
+    return rows
 
 
 def hedge_mark_vs_last(x):

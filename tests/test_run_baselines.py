@@ -1,11 +1,14 @@
 import pandas as pd
 from src.run_baselines import (
+    COST_SCENARIOS,
     PERP_TAKER_FEE_RATE,
     SPOT_TAKER_FEE_RATE,
     build,
     make_ledger,
     turnover,
 )
+from src.run_margin import apply_costs
+from src.run_rally_margin import breach_return
 
 
 def test_complete_cycle_has_two_half_turns():
@@ -32,6 +35,33 @@ def test_complete_cycle_fees_use_actual_traded_values():
     assert abs(ledger.spot_fee_return.sum() - expected_spot) < 1e-12
     assert abs(ledger.perp_fee_return.sum() - expected_perp) < 1e-12
     assert ledger.total_fee_return.sum() != 0.0031
+
+
+def test_stress_costs_scale_actual_value_fees_without_changing_gross_return():
+    frame = pd.DataFrame(
+        {
+            "spot_open": [100.0, 100.0, 100.0],
+            "perp_last_open": [100.0, 100.0, 100.0],
+            "funding_settled": [float("nan")] * 3,
+            "hedge_execution_return_last": [0.0] * 3,
+        }
+    )
+    ledger = make_ledger(frame, pd.Series([True, True, True]))
+    assert COST_SCENARIOS == {"fee_only": 1.0, "base": 1.5, "stress": 3.0}
+    assert abs(ledger.total_fee_return.sum() * COST_SCENARIOS["stress"] - 0.0093) < 1e-12
+
+
+def test_cost_sensitivity_uses_actual_fees_not_flat_turnover_bps():
+    ledger = pd.DataFrame({"total_fee_return": [0.001, 0.002], "gross_return": [0.0, 0.0]})
+    stressed = apply_costs(ledger, COST_SCENARIOS["stress"])
+    assert stressed.cost_return.tolist() == [0.003, 0.006]
+    assert stressed.spread_slippage_proxy_return.tolist() == [0.002, 0.004]
+
+
+def test_rally_margin_breach_thresholds_are_explicit():
+    assert abs(breach_return(0.25) - 0.19047619047619047) < 1e-12
+    assert abs(breach_return(0.50) - 0.42857142857142855) < 1e-12
+    assert abs(breach_return(1.00) - 0.9047619047619048) < 1e-12
 
 
 def test_features_do_not_use_same_settlement_funding():

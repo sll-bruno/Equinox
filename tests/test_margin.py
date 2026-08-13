@@ -11,6 +11,8 @@ def margin_frame(closes):
             "timestamp_utc": pd.date_range("2026-01-01", periods=len(closes), freq="h", tz="UTC"),
             "perp_mark_open": [100.0] * len(closes),
             "perp_mark_close": closes,
+            "spot_open": [100.0] * len(closes),
+            "perp_last_open": [100.0] * len(closes),
             "funding_settled": [float("nan")] * len(closes),
             "hedge_execution_return_last": [0.0] * len(closes),
         }

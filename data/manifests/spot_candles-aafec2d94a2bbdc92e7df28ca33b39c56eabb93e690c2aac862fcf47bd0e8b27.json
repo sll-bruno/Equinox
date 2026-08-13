@@ -1,0 +1,8 @@
+{
+  "dataset": "spot_candles",
+  "url": "https://api.bybit.com/v5/market/kline?category=spot&symbol=BTCUSDT&interval=60&limit=1000&start=1703030400000&end=1706486400000",
+  "collected_at_utc": "2026-08-13T02:41:30.053262+00:00",
+  "sha256": "aafec2d94a2bbdc92e7df28ca33b39c56eabb93e690c2aac862fcf47bd0e8b27",
+  "file": "data/raw/bybit/spot_candles/aafec2d94a2bbdc92e7df28ca33b39c56eabb93e690c2aac862fcf47bd0e8b27.json",
+  "api_time_ms": 1786588889843
+}

@@ -14,18 +14,18 @@ Bybit specifies that positive funding makes long holders pay short holders. The 
 
 ## Actual-value fee results
 
-Funding, execution hedge P&L, signals and positions retain the prior implementation. Only trading fees changed: instead of subtracting fixed 31/50/100 bp scenarios, V0 applies 0.10% spot and 0.055% perpetual taker fees to the value actually traded at every entry and exit. The approximate 31 bp round trip is not used directly.
+Funding, execution hedge P&L, signals and positions retain the prior implementation. V0 applies 0.10% spot and 0.055% perpetual taker fees to the value actually traded at every entry and exit; the approximate 31 bp round trip is not used directly. Because historical bid/ask and fill data are unavailable, the cost sensitivity retains those actual fees and applies a multiplier: 1.0× (`fee_only`), 1.5× (`base`) and 3.0× (`stress`). The excess is an explicit spread/slippage proxy, not measured execution data.
 
-| Strategy | Gross return | Spot fees | Perp fees | Net with terminal exit |
-|---|---:|---:|---:|---:|
-| always-on | 0.8203% | 0.1779% | 0.0978% | 0.5427% |
-| positive last settled funding | 0.7509% | 7.1911% | 3.9533% | -9.8818% |
-| funding above threshold | 0.4903% | 7.3991% | 4.0677% | -10.4044% |
-| positive funding with volatility/basis filter | 0.3533% | 6.5938% | 3.6249% | -9.4021% |
+| Strategy | Gross return | Actual fees | Net fee-only | Net base (1.5×) | Net stress (3×) |
+|---|---:|---:|---:|---:|---:|
+| always-on | 0.8203% | 0.2756% | 0.5427% | 0.4040% | -0.0116% |
+| positive last settled funding | 0.7509% | 11.1444% | -9.8818% | -14.7752% | -27.9369% |
+| funding above threshold | 0.4903% | 11.4667% | -10.4044% | -15.4062% | -28.8166% |
+| positive funding with volatility/basis filter | 0.3533% | 10.2187% | -9.4021% | -13.9232% | -26.1952% |
 
 The always-on gross return remains 0.8203%, consisting of 0.8164% funding and 0.0013% execution hedge return. This confirms that the fee change did not alter either gross-return component.
 
-The reactive rules remain negative because their repeated entries and exits generate high fees. Exact results and fee components are in `baseline_summary.csv`.
+The reactive rules remain negative because their repeated entries and exits generate high fees. The adverse-cost test reverses even always-on's small pilot profit, so this is not evidence that the strategy reliably survives costs. Exact results and fee components are in `baseline_summary.csv`.
 
 ## Mark versus last-price comparator
 
@@ -33,4 +33,4 @@ Over the same hourly intervals, the compounded execution hedge return is -0.0028
 
 ## What this establishes
 
-This is still a three-month descriptive pilot, not a robust strategy result. It supports no HMM decision yet. The next valid research step is longer history and a margin/collateral model; neither is included in this change.
+This remains a three-month descriptive pilot, not a robust strategy result. A separate 2023-24 rally margin stress is now reported in `rally_margin_findings.md`; it does not make the samples a continuous backtest. It supports no HMM decision yet.

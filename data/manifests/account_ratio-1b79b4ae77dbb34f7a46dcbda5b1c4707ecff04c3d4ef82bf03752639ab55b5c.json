@@ -1,0 +1,8 @@
+{
+  "dataset": "account_ratio",
+  "url": "https://api.bybit.com/v5/market/account-ratio?category=linear&symbol=BTCUSDT&period=1h&limit=500&startTime=1711670400000&endTime=1713398400000",
+  "collected_at_utc": "2026-08-13T02:42:34.022565+00:00",
+  "sha256": "1b79b4ae77dbb34f7a46dcbda5b1c4707ecff04c3d4ef82bf03752639ab55b5c",
+  "file": "data/raw/bybit/account_ratio/1b79b4ae77dbb34f7a46dcbda5b1c4707ecff04c3d4ef82bf03752639ab55b5c.json",
+  "api_time_ms": 1786588953805
+}

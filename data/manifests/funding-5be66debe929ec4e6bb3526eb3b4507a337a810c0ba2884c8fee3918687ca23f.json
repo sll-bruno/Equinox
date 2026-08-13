@@ -1,0 +1,8 @@
+{
+  "dataset": "funding",
+  "url": "https://api.bybit.com/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=200&startTime=1713398400000&endTime=1716854400000",
+  "collected_at_utc": "2026-08-13T02:42:02.277894+00:00",
+  "sha256": "5be66debe929ec4e6bb3526eb3b4507a337a810c0ba2884c8fee3918687ca23f",
+  "file": "data/raw/bybit/funding/5be66debe929ec4e6bb3526eb3b4507a337a810c0ba2884c8fee3918687ca23f.json",
+  "api_time_ms": 1786588922083
+}

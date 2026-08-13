@@ -5,3 +5,6 @@ __pycache__/
 # Detailed scenario ledgers are reproducible outputs; version summaries instead.
 reports/margin_*.parquet
 reports/dead_zone_*.parquet
+reports/rally_margin_*.parquet
+reports/pilot_*_base.parquet
+reports/pilot_*_stress.parquet

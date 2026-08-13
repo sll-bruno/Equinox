@@ -12,13 +12,15 @@ Mark price is used for the basis feature (`mark_close - spot_close`) and for the
 
 ## Costs and terminal close
 
-Every strategy is closed at the final timestamp. A complete cycle means opening **and** closing both legs: buy then sell spot, and sell then buy the linear perpetual. The full-cycle assumptions are:
+Every strategy is closed at the final timestamp. A complete cycle means opening **and** closing both legs: buy then sell spot, and sell then buy the linear perpetual.
 
-- `fee_only`: 31 bp = two half-turns, each with VIP-0 taker spot fee of 10 bp plus linear-perp taker fee of 5.5 bp.
-- `base`: 50 bp = documented 31 bp fees plus a 19 bp non-historical aggregate buffer for spread/slippage.
-- `stress`: 100 bp = documented 31 bp fees plus a 69 bp adverse-execution buffer.
+V0 assumes Bybit non-VIP taker execution: 0.10% for spot and 0.055% for the linear perpetual. Fees are applied to the value actually traded on every operation:
 
-One isolated entry or exit is half a cycle and costs half the stated number. These are assumptions, not observed historical spreads. No performance claim is valid until the collector, validations and analysis run successfully.
+`total fees = 0.001 q S0 + 0.001 q ST + 0.00055 q F0 + 0.00055 q FT`
+
+The approximate 31 bp complete-cycle cost is not subtracted directly because entry and exit prices can differ. For fee calculation only, each entry is normalized to one unit of spot notional (`q = 1 / S0`) and that quantity is carried until exit. The existing funding, basis, signal and position calculations are unchanged. V0 does not include spread, slippage or the former non-historical execution buffers.
+
+No performance claim is valid until the collector, validations and analysis run successfully.
 
 The unavailable `Auditoria_Dados_Bybit_BTCUSDT.md` was not used; this fact must remain in the research log until the source is recovered.
 

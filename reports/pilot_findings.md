@@ -12,19 +12,20 @@ Period: 2026-05-12 00:00 UTC through 2026-08-13 00:00 UTC; 2,233 hourly timestam
 
 Bybit specifies that positive funding makes long holders pay short holders. The raw API record in `data/raw/bybit/funding/4954d6dde7105727e65c95a6a18836284673db674fc359c5337632174f954139.json` reports BTCUSDT funding of `+0.000016` at 2026-05-12 00:00 UTC. For a one-USDT equivalent short notional this is a receipt of 0.000016 USDT; for the baseline short-perp leg it is therefore added, not subtracted. The sign in the motor is confirmed.
 
-## Old versus revised results
+## Actual-value fee results
 
-The old published results omitted the terminal exit. They also silently dropped the final settlement because an unavailable `t→t+1` return produced `NaN`. `legacy_published_*` in `baseline_summary.csv` reproduces that behavior only for comparison. `net_return_without_terminal_exit` uses the corrected funding timing; `net_return_with_terminal_exit` is the current result.
+Funding, execution hedge P&L, signals and positions retain the prior implementation. Only trading fees changed: instead of subtracting fixed 31/50/100 bp scenarios, V0 applies 0.10% spot and 0.055% perpetual taker fees to the value actually traded at every entry and exit. The approximate 31 bp round trip is not used directly.
 
-| Strategy | Cost cycle | Old published net | Revised net, no terminal exit | Revised net, terminal exit |
+| Strategy | Gross return | Spot fees | Perp fees | Net with terminal exit |
 |---|---:|---:|---:|---:|
-| always-on | 31 bp | 0.6621% | 0.6641% | 0.5081% |
-| always-on | 50 bp | 0.5664% | 0.5683% | 0.3169% |
-| always-on | 100 bp | 0.3143% | 0.3163% | -0.1853% |
+| always-on | 0.8203% | 0.1779% | 0.0978% | 0.5427% |
+| positive last settled funding | 0.7509% | 7.1911% | 3.9533% | -9.8818% |
+| funding above threshold | 0.4903% | 7.3991% | 4.0677% | -10.4044% |
+| positive funding with volatility/basis filter | 0.3533% | 6.5938% | 3.6249% | -9.4021% |
 
-The terminal exit changes only net P&L. The revised always-on gross return is 0.8203%, consisting of 0.8164% funding and 0.0013% execution hedge return; it is unchanged between revised-without-exit and revised-with-exit. It differs from the old reported gross by 0.00194 percentage points solely because the corrected ledger recognizes the final settled funding.
+The always-on gross return remains 0.8203%, consisting of 0.8164% funding and 0.0013% execution hedge return. This confirms that the fee change did not alter either gross-return component.
 
-The reactive rules remain negative at all cost levels after the timing correction and final exit. The exact revised results, including old-versus-new columns and turnover, are in `baseline_summary.csv`.
+The reactive rules remain negative because their repeated entries and exits generate high fees. Exact results and fee components are in `baseline_summary.csv`.
 
 ## Mark versus last-price comparator
 

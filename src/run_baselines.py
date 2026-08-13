@@ -6,10 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data/normalized/bybit"
 OUT = ROOT / "reports"
 
-# Bybit non-VIP taker fees used by the V0 specification. Fees are applied to
-# the value actually traded on each leg, never as a fixed 31 bp cycle charge.
-SPOT_TAKER_FEE_RATE = 0.001
-PERP_TAKER_FEE_RATE = 0.00055
+# Basis points per complete cycle: open and close both spot and perp legs.
+COSTS_BPS = {"fee_only": 31, "base": 50, "stress": 100}
 
 
 def read(name):
@@ -94,92 +92,60 @@ def make_ledger(x, signal):
     # signal t -> trade at open t+1 -> position[t] earns t→t+1 execution P&L.
     ledger["position"] = signal.fillna(False).astype(int).shift(1).fillna(0)
     ledger["trading_turnover"], ledger["terminal_exit_turnover"], ledger["turnover"] = turnover(ledger.position)
-
-    # Each entry deploys one unit of spot notional. The BTC quantity is fixed
-    # until exit and is identical on the long-spot and short-perp legs.
-    previous_position = ledger.position.shift(1).fillna(0)
-    ledger["entry"] = ((ledger.position == 1) & (previous_position == 0)).astype(int)
-    ledger["exit"] = ((ledger.position == 0) & (previous_position == 1)).astype(int)
-    entry_quantity = (1 / ledger.spot_open).where(ledger.entry == 1)
-    ledger["quantity_btc"] = entry_quantity.ffill().where(ledger.position == 1, 0.0)
-    exit_quantity = ledger.quantity_btc.shift(1).where(ledger.exit == 1, 0.0).fillna(0)
-
-    ledger["spot_entry_fee"] = (
-        ledger.entry * ledger.quantity_btc * ledger.spot_open * SPOT_TAKER_FEE_RATE
-    )
-    ledger["perp_entry_fee"] = (
-        ledger.entry * ledger.quantity_btc * ledger.perp_last_open * PERP_TAKER_FEE_RATE
-    )
-    ledger["spot_exit_fee"] = exit_quantity * ledger.spot_open * SPOT_TAKER_FEE_RATE
-    ledger["perp_exit_fee"] = exit_quantity * ledger.perp_last_open * PERP_TAKER_FEE_RATE
-
-    # An open final position is closed at the last available executable open.
-    ledger["terminal_spot_exit_fee"] = 0.0
-    ledger["terminal_perp_exit_fee"] = 0.0
-    if ledger.position.iloc[-1] == 1:
-        final_quantity = ledger.quantity_btc.iloc[-1]
-        ledger.loc[ledger.index[-1], "terminal_spot_exit_fee"] = (
-            final_quantity * ledger.spot_open.iloc[-1] * SPOT_TAKER_FEE_RATE
-        )
-        ledger.loc[ledger.index[-1], "terminal_perp_exit_fee"] = (
-            final_quantity * ledger.perp_last_open.iloc[-1] * PERP_TAKER_FEE_RATE
-        )
-
-    ledger["spot_fees"] = (
-        ledger.spot_entry_fee + ledger.spot_exit_fee + ledger.terminal_spot_exit_fee
-    )
-    ledger["perp_fees"] = (
-        ledger.perp_entry_fee + ledger.perp_exit_fee + ledger.terminal_perp_exit_fee
-    )
-    ledger["total_fees"] = ledger.spot_fees + ledger.perp_fees
-
     # A t-settlement belongs to the position carried into t, i.e. the preceding interval [t-8h, t].
     ledger["funding_position_prior_interval"] = ledger.position.shift(1).fillna(0)
-    funding_quantity = ledger.quantity_btc.shift(1).fillna(0)
     ledger["funding_cashflow"] = (
-        ledger.funding_settled.fillna(0)
-        * ledger.funding_position_prior_interval
-        * funding_quantity
-        * ledger.perp_mark_open
+        ledger.funding_settled.fillna(0) * ledger.funding_position_prior_interval
     )
-    spot_change = ledger.spot_open.shift(-1) - ledger.spot_open
-    perp_change = ledger.perp_last_open.shift(-1) - ledger.perp_last_open
-    ledger["basis_pnl"] = (
-        ledger.position * ledger.quantity_btc * (spot_change - perp_change)
+    # There is no t→t+1 price move after the final timestamp, but an open position still pays exit cost.
+    ledger["execution_hedge_return"] = (
+        ledger.position * ledger.hedge_execution_return_last
     ).fillna(0)
-    ledger["gross_pnl"] = ledger.funding_cashflow + ledger.basis_pnl
-    ledger["net_pnl"] = ledger.gross_pnl - ledger.total_fees
-    ledger["equity"] = 1 + ledger.net_pnl.cumsum()
+    ledger["gross_return"] = ledger.execution_hedge_return + ledger.funding_cashflow
+
+    # Reproduces the published pilot for transparent old-versus-new comparison only.
+    ledger["legacy_funding_cashflow"] = ledger.position * ledger.funding_settled.fillna(0)
+    # The old output's terminal NaN discarded both its terminal price P&L and a same-row settlement.
+    legacy_execution = ledger.position * ledger.hedge_execution_return_last
+    ledger["legacy_gross_return"] = legacy_execution + ledger.legacy_funding_cashflow
     return ledger
 
 
 def evaluate(x, name, signal):
     ledger = make_ledger(x, signal)
-    terminal_fees = (
-        ledger.terminal_spot_exit_fee.sum() + ledger.terminal_perp_exit_fee.sum()
-    )
-    row = {
-        "strategy": name,
-        "fee_model": "bybit_non_vip_taker_actual_traded_value",
-        "spot_taker_fee_rate": SPOT_TAKER_FEE_RATE,
-        "perp_taker_fee_rate": PERP_TAKER_FEE_RATE,
-        "gross_return": ledger.gross_pnl.sum(),
-        "net_return": ledger.net_pnl.sum(),
-        "funding_return": ledger.funding_cashflow.sum(),
-        "basis_pnl_return": ledger.basis_pnl.sum(),
-        "spot_fee_return": ledger.spot_fees.sum(),
-        "perp_fee_return": ledger.perp_fees.sum(),
-        "total_fee_return": ledger.total_fees.sum(),
-        "terminal_exit_fee_return": terminal_fees,
-        "max_drawdown": max_drawdown(ledger.equity),
-        "annualized_volatility": ledger.net_pnl.std() * (24 * 365) ** 0.5,
-        "entries": ledger.entry.sum(),
-        "exits_including_terminal": ledger.exit.sum() + ledger.terminal_exit_turnover.sum(),
-        "turnover_events": ledger.turnover.sum(),
-        "exposure": ledger.position.mean(),
-    }
-    ledger.to_parquet(OUT / f"pilot_{name}.parquet", index=False)
-    return [row]
+    rows = []
+    for scenario, cycle_bps in COSTS_BPS.items():
+        half_turn_cost = cycle_bps / 20_000
+        ledger["cost_return"] = ledger.turnover * half_turn_cost
+        ledger["net_return"] = ledger.gross_return - ledger.cost_return
+        ledger["legacy_net_return"] = ledger.legacy_gross_return - ledger.trading_turnover * half_turn_cost
+        ledger["net_return_without_terminal_exit"] = ledger.gross_return - ledger.trading_turnover * half_turn_cost
+        ledger["equity"] = (1 + ledger.net_return.fillna(0)).cumprod()
+        net = ledger.net_return.dropna()
+        rows.append(
+            {
+                "strategy": name,
+                "cost_scenario": scenario,
+                "cycle_cost_bps": cycle_bps,
+                "legacy_published_net_return_no_terminal_exit": compounded_return(ledger.legacy_net_return),
+                "net_return_without_terminal_exit": compounded_return(ledger.net_return_without_terminal_exit),
+                "net_return_with_terminal_exit": compounded_return(ledger.net_return),
+                "terminal_exit_impact": compounded_return(ledger.net_return)
+                - compounded_return(ledger.net_return_without_terminal_exit),
+                "legacy_published_gross_return": compounded_return(ledger.legacy_gross_return),
+                "gross_return": compounded_return(ledger.gross_return),
+                "funding_return": ledger.funding_cashflow.sum(),
+                "execution_hedge_return": ledger.execution_hedge_return.sum(),
+                "max_drawdown": max_drawdown(ledger.equity),
+                "annualized_volatility": net.std() * (24 * 365) ** 0.5,
+                "turnover_without_terminal_exit": ledger.trading_turnover.sum(),
+                "terminal_exit_turnover": ledger.terminal_exit_turnover.sum(),
+                "turnover_events": ledger.turnover.sum(),
+                "exposure": ledger.position.mean(),
+            }
+        )
+        ledger.to_parquet(OUT / f"pilot_{name}_{scenario}.parquet", index=False)
+    return rows
 
 
 def hedge_mark_vs_last(x):
@@ -199,7 +165,7 @@ def main():
     summary = pd.DataFrame(result)
     summary.to_csv(OUT / "baseline_summary.csv", index=False)
     pd.DataFrame([hedge_mark_vs_last(x)]).to_csv(OUT / "hedge_mark_vs_last.csv", index=False)
-    print(summary.to_string(index=False))
+    print(summary.to_string(index=False, float_format=lambda value: f"{value:.4%}"))
 
 
 if __name__ == "__main__":

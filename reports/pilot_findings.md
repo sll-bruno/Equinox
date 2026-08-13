@@ -1,36 +1,30 @@
-# Bybit BTCUSDT pilot — V0 actual-value fee model
+# Bybit BTCUSDT pilot — revised baseline
 
 Period: 2026-05-12 00:00 UTC through 2026-08-13 00:00 UTC; 2,233 hourly timestamps and 280 settled funding observations; Bybit only.
 
-## V0 P&L convention
+## Method corrections applied
 
-1. Each entry deploys one unit of spot notional, with `q = 1 / spot entry price`. The same BTC quantity is held long in spot and short in the perpetual until exit.
-2. Basis P&L is `q[(F0 - S0) - (FT - ST)]`, accumulated from executable open-to-open spot and perpetual last-trade prices.
-3. Funding at settlement `t` is credited to the position carried into `t`. Because wallet cashflows are unavailable, the payment is reconstructed as `funding rate × q × contemporaneous perpetual mark price`.
-4. Every strategy pays both entry and exit fees, including a terminal close for an open final position.
+1. All strategies now pay a terminal exit for both legs. A full open-and-close cycle has two half-turns; `always_on` therefore has turnover of exactly 2, not 1.
+2. Funding at settlement `t` is credited to the position carried into `t`, never to the position opening at `t`.
+3. Execution P&L uses BTCUSDT spot and perpetual **opening last-trade prices** between `t` and `t+1`. Mark price is used only for basis and as a non-executable comparator.
 
 ## Funding sign check
 
 Bybit specifies that positive funding makes long holders pay short holders. The raw API record in `data/raw/bybit/funding/4954d6dde7105727e65c95a6a18836284673db674fc359c5337632174f954139.json` reports BTCUSDT funding of `+0.000016` at 2026-05-12 00:00 UTC. For a one-USDT equivalent short notional this is a receipt of 0.000016 USDT; for the baseline short-perp leg it is therefore added, not subtracted. The sign in the motor is confirmed.
 
-## Trading fees
+## Old versus revised results
 
-V0 assumes Bybit non-VIP taker fees: 0.10% on spot and 0.055% on the linear perpetual. The old fixed 31/50/100 bp scenarios were removed. Every fee is now charged on the value actually traded at that operation:
+The old published results omitted the terminal exit. They also silently dropped the final settlement because an unavailable `t→t+1` return produced `NaN`. `legacy_published_*` in `baseline_summary.csv` reproduces that behavior only for comparison. `net_return_without_terminal_exit` uses the corrected funding timing; `net_return_with_terminal_exit` is the current result.
 
-`fees = 0.001 q(S0 + ST) + 0.00055 q(F0 + FT)`
+| Strategy | Cost cycle | Old published net | Revised net, no terminal exit | Revised net, terminal exit |
+|---|---:|---:|---:|---:|
+| always-on | 31 bp | 0.6621% | 0.6641% | 0.5081% |
+| always-on | 50 bp | 0.5664% | 0.5683% | 0.3169% |
+| always-on | 100 bp | 0.3143% | 0.3163% | -0.1853% |
 
-The approximate 31 bp round-trip remains a useful reference only when entry and exit prices are nearly equal. It is not used directly by the engine. Spread, slippage and the former non-historical execution buffers are deliberately excluded from V0.
+The terminal exit changes only net P&L. The revised always-on gross return is 0.8203%, consisting of 0.8164% funding and 0.0013% execution hedge return; it is unchanged between revised-without-exit and revised-with-exit. It differs from the old reported gross by 0.00194 percentage points solely because the corrected ledger recognizes the final settled funding.
 
-## V0 results
-
-| Strategy | Gross P&L | Funding | Basis P&L | Spot fees | Perp fees | Net P&L |
-|---|---:|---:|---:|---:|---:|---:|
-| always-on | 0.6620% | 0.6675% | -0.0055% | 0.1779% | 0.0978% | 0.3864% |
-| positive last settled funding | 0.7504% | 0.7642% | -0.0138% | 7.1911% | 3.9533% | -10.3940% |
-| funding above threshold | 0.4925% | 0.3826% | 0.1099% | 7.3991% | 4.0677% | -10.9743% |
-| positive funding with volatility/basis filter | 0.3538% | 0.4130% | -0.0591% | 6.5938% | 3.6249% | -9.8649% |
-
-The reactive rules remain negative because repeated entry and exit fees overwhelm the funding earned. Exact outputs and separate fee components are in `baseline_summary.csv` and the per-strategy Parquet ledgers.
+The reactive rules remain negative at all cost levels after the timing correction and final exit. The exact revised results, including old-versus-new columns and turnover, are in `baseline_summary.csv`.
 
 ## Mark versus last-price comparator
 
@@ -38,4 +32,4 @@ Over the same hourly intervals, the compounded execution hedge return is -0.0028
 
 ## What this establishes
 
-This is still a three-month descriptive pilot, not a robust strategy result. It excludes spread, slippage, borrow, network and transfer costs, FX conversion, capital opportunity cost, sophisticated margin modelling and taxes. It supports no HMM decision yet.
+This is still a three-month descriptive pilot, not a robust strategy result. It supports no HMM decision yet. The next valid research step is longer history and a margin/collateral model; neither is included in this change.

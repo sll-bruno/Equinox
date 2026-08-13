@@ -1,0 +1,8 @@
+{
+  "dataset": "mark_price",
+  "url": "https://api.bybit.com/v5/market/mark-price-kline?category=linear&symbol=BTCUSDT&interval=60&limit=1000&start=1782000000000&end=1785456000000",
+  "collected_at_utc": "2026-08-13T00:45:59.310093+00:00",
+  "sha256": "c43bfd92c470732993d6ed5d34044c842b53b0a3b7a308b76d3146110cec604e",
+  "file": "data/raw/bybit/mark_price/c43bfd92c470732993d6ed5d34044c842b53b0a3b7a308b76d3146110cec604e.json",
+  "api_time_ms": 1786581959260
+}
